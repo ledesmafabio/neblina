@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Neblina de Voz Móvil</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
+    <style>
+        body { margin: 0; padding: 0; background: #050510; color: white; font-family: sans-serif; overflow: hidden; touch-action: none; }
+        #ui { position: absolute; top: 20px; width: 100%; text-align: center; z-index: 10; pointer-events: none; }
+        #word { text-shadow: 0 0 15px #0cf; font-size: 1.8em; font-weight: bold; color: #0cf; text-transform: uppercase; padding: 0 10px; }
+        #mic-status { font-size: 0.8em; color: #666; margin-top: 5px; }
+        
+        #modal { display: flex; position: fixed; z-index: 100; left: 0; top: 0; width: 100%; height: 100%; background: #050510; justify-content: center; align-items: center; }
+        .box { background: #111; padding: 30px; border-radius: 20px; border: 2px solid #0cf; text-align: center; width: 80%; }
+        
+        button { 
+            padding: 15px 30px; cursor: pointer; background: #0cf; color: #000; 
+            border: none; border-radius: 50px; font-weight: bold; font-size: 1.1em;
+            box-shadow: 0 0 20px rgba(0,204,255,0.4); pointer-events: auto;
+        }
+        button:active { transform: scale(0.95); background: #008fb3; }
+    </style>
+</head>
+<body>
+
+    <div id="ui">
+        <div id="word">Toca para empezar</div>
+        <div id="mic-status">Micrófono desactivado</div>
+    </div>
+
+    <div id="modal">
+        <div class="box">
+            <h2 style="color: #0cf">NEBLINA MÁGICA</h2>
+            <p>1. Pulsa el botón.<br>2. Acepta el permiso de micro.<br>3. Di una palabra.</p>
+            <button id="startBtn">INICIAR EXPERIENCIA</button>
+        </div>
+    </div>
+
+<script>
+let particles = [];
+let targetPoints = [];
+let isWordActive = false;
+let timer = 0;
+let pg;
+let recognition;
+let isStarted = false;
+
+// --- CONFIGURACIÓN DE VOZ MÓVIL ---
+function initVoice() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    
+    if (!SpeechRecognition) {
+        alert("Tu navegador no soporta reconocimiento de voz. Intenta con Chrome en Android.");
+        return;
+    }
+
+    recognition = new SpeechRecognition();
+    recognition.lang = 'es-ES';
+    recognition.continuous = true;
+    recognition.interimResults = false;
+
+    recognition.onstart = () => {
+        document.getElementById('mic-status').innerText = "• Escuchando...";
+        document.getElementById('mic-status').style.color = "#0f0";
+    };
+
+    recognition.onresult = (e) => {
+        let text = e.results[e.results.length - 1][0].transcript.trim();
+        createWordPoints(text);
+    };
+
+    recognition.onerror = (e) => {
+        console.error("Error:", e.error);
+        document.getElementById('mic-status').innerText = "Error: " + e.error;
+        // Si hay error en móvil, intentamos reiniciar tras un segundo
+        setTimeout(() => { if(isStarted) try { recognition.start(); } catch(err){} }, 1000);
+    };
+
+    recognition.onend = () => {
+        // En Android el micro se apaga si no detecta voz. Lo reiniciamos.
+        if(isStarted) try { recognition.start(); } catch(err){}
+    };
+
+    try {
+        recognition.start();
+        isStarted = true;
+    } catch (err) {
+        console.log("Ya estaba iniciado");
+    }
+}
+
+function createWordPoints(txt) {
+    document.getElementById('word').innerText = txt;
+    targetPoints = [];
+    
+    pg.background(0);
+    pg.fill(255);
+    // Ajuste de tamaño para pantallas verticales
+    let fontSize = width / (txt.length * 0.6);
+    if (fontSize > 120) fontSize = 120;
+    pg.textSize(fontSize);
+    pg.text(txt.toUpperCase(), pg.width/2, pg.height/2);
+
+    pg.loadPixels();
+    // Mayor salto de píxeles para fluidez en móviles
+    let step = width < 600 ? 8 : 6;
+    for (let x = 0; x < pg.width; x += step) {
+        for (let y = 0; y < pg.height; y += step) {
+            let index = (x + y * pg.width) * 4;
+            if (pg.pixels[index] > 128) {
+                targetPoints.push(createVector(x, y));
+            }
+        }
+    }
+    isWordActive = true;
+    timer = 300; // 2.5 segundos
+}
+
+// Escuchar el clic del botón de forma explícita
+document.getElementById('startBtn').addEventListener('click', function() {
+    document.getElementById('modal').style.display = 'none';
+    userStartAudio(); // Iniciar motor de audio de p5.js
+    initVoice();      // Iniciar reconocimiento
+});
+
+// --- P5.JS ---
+function setup() {
+    let canvas = createCanvas(windowWidth, windowHeight);
+    pg = createGraphics(width, height);
+    pg.textAlign(CENTER, CENTER);
+    pg.pixelDensity(1);
+
+    // Menos partículas en móvil para mantener 60 FPS
+    let pCount = width < 600 ? 400 : 700;
+    for (let i = 0; i < pCount; i++) {
+        particles.push(new Particle());
+    }
+}
+
+function draw() {
+    background(5, 5, 20, 60);
+
+    if (timer > 0) {
+        timer--;
+        if (timer <= 0) isWordActive = false;
+    }
+
+    for (let i = 0; i < particles.length; i++) {
+        if (isWordActive && targetPoints.length > 0) {
+            let t = targetPoints[i % targetPoints.length];
+            particles[i].follow(t);
+        } else {
+            particles[i].wander();
+        }
+        particles[i].update();
+        particles[i].show();
+    }
+}
+
+class Particle {
+    constructor() {
+        this.pos = createVector(random(width), random(height));
+        this.vel = p5.Vector.random2D();
+        this.acc = createVector();
+        this.maxS = width < 600 ? 8 : 6; // Más rápidos en pantalla chica
+        this.maxF = 0.5;
+        this.c = color(random(100,255), random(100,255), 255, 180);
+    }
+
+    follow(target) {
+        let desired = p5.Vector.sub(target, this.pos);
+        let d = desired.mag();
+        let speed = this.maxS;
+        if (d < 80) speed = map(d, 0, 80, 0, this.maxS);
+        desired.setMag(speed);
+        let steer = p5.Vector.sub(desired, this.vel);
+        steer.limit(this.maxF);
+        this.acc.add(steer);
+    }
+
+    wander() {
+        let noiseVal = noise(this.pos.x * 0.01, this.pos.y * 0.01, frameCount * 0.01);
+        let angle = map(noiseVal, 0, 1, 0, TWO_PI * 2);
+        let force = p5.Vector.fromAngle(angle).mult(0.15);
+        this.acc.add(force);
+        
+        if (this.pos.x < 0) this.pos.x = width;
+        if (this.pos.x > width) this.pos.x = 0;
+        if (this.pos.y < 0) this.pos.y = height;
+        if (this.pos.y > height) this.pos.y = 0;
+    }
+
+    update() {
+        this.vel.add(this.acc);
+        this.vel.limit(this.maxS);
+        this.pos.add(this.vel);
+        this.acc.mult(0);
+        
+        if (frameCount % 30 == 0) {
+            this.c = color(random(150,255), random(150,255), 255, 180);
+        }
+    }
+
+    show() {
+        stroke(this.c);
+        strokeWeight(width < 600 ? 2.5 : 3.5);
+        point(this.pos.x, this.pos.y);
+    }
+}
+
+function windowResized() {
+    resizeCanvas(windowWidth, windowHeight);
+    pg = createGraphics(width, height);
+    pg.textAlign(CENTER, CENTER);
+}
+</script>
+</body>
+</html>
